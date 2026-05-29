@@ -1,0 +1,10 @@
+{
+  "rf_best_params": {
+    "max_depth": 20,
+    "min_samples_leaf": 5,
+    "n_estimators": 200
+  },
+  "rf_threshold": 0.21111205564733995,
+  "rf_cal_threshold": 0.044397335350561985,
+  "scale_pos": 18.894736842105264
+}
