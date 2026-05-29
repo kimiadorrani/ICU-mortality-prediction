@@ -37,7 +37,8 @@ Two thresholds are used depending on deployment context — see [Inference](#inf
 │   ├── 03_baseline_model.ipynb            # LR, RF, XGBoost training + evaluation
 │   ├── 04_model_extensions.ipynb          # Domain adaptation: IW, label shift, MMD
 │   ├── 05_gap_analysis.ipynb              # MIMIC generalization gap root-cause analysis
-│   └── 06_results_comparison.ipynb        # Full visual comparison: ROC/PR, calibration, SHAP, subgroups
+│   └── 06_results_comparison.ipynb        # Full visual comparison: ROC/PR curves, calibration, confusion matrices,
+│                                          #   SHAP (eICU + MIMIC), subgroup breakdown, bootstrap CIs, DCA
 ├── data/
 │   ├── eicu_raw/                          # Raw eICU database tables
 │   ├── mimic_3_raw/                       # Raw MIMIC-III database tables
@@ -59,7 +60,15 @@ Two thresholds are used depending on deployment context — see [Inference](#inf
 │   └── extensions/
 │       └── extension_models.pkl           # IW model, MMD state, da_scaler (saved by 04)
 ├── documents/
-│   └── NEXT_STEPS.md                      # Prioritised next steps
+│   ├── roc_pr_comparison.png              # ROC + PR curves for all methods on MIMIC
+│   ├── metrics_bar_comparison.png         # Bar chart: AUC / Sensitivity / Specificity per method
+│   ├── calibration_comparison.png         # Calibration before/after label shift correction
+│   ├── confusion_matrices.png             # Confusion matrices for all 4 methods
+│   ├── shap_importance.png                # SHAP top-20 on eICU training set
+│   ├── shap_eicu_vs_mimic.png             # SHAP comparison: eICU training vs MIMIC external
+│   ├── subgroup_age_auc.png               # Subgroup AUC by age group
+│   ├── subgroup_icd9_auc.png              # Subgroup AUC by ICD-9 chapter
+│   └── decision_curve_analysis.png        # DCA: net benefit vs threshold for all methods
 └── src/                                   # (reserved for shared utilities)
 ```
 
@@ -115,14 +124,16 @@ Calibration: sigmoid, 5-fold cross-validation on training set only.
 
 ### Domain Adaptation Extensions (`04_model_extensions.ipynb`)
 
-| Method | MIMIC ROC-AUC | MIMIC Sensitivity | MIMIC Specificity | Notes |
-|---|---|---|---|---|
-| Baseline RF (calibrated) | 0.735 | 65% | 70% | Reference — threshold 0.044 |
-| Importance Weighting (IW) | **0.747** | 59% | 77% | Domain classifier AUC = 0.984 — extreme shift detected |
-| Label Shift Correction (LS) | 0.735 | **70%** | 70% | ROC unchanged by design; gain is in sensitivity |
-| MMD Neural Network | 0.611 | 48% | 78% | Underperforms — too few target samples (136 patients) |
+| Method | MIMIC ROC-AUC | 95% CI | MIMIC Sensitivity | MIMIC Specificity | Notes |
+|---|---|---|---|---|---|
+| Baseline RF (calibrated) | 0.735 | 0.642–0.823 | 65% | 70% | Reference — threshold 0.044 |
+| Importance Weighting (IW) | **0.747** | 0.656–0.831 | 59% | 77% | Domain classifier AUC = 0.984 — extreme shift detected |
+| Label Shift Correction (LS) | 0.735 | 0.642–0.823 | **70%** | 70% | ROC unchanged by design; gain is in sensitivity |
+| MMD Neural Network | 0.611 | 0.510–0.711 | 48% | 78% | Underperforms — too few target samples (136 patients) |
 
-IW gives the best AUC (+0.012). Label Shift gives the best sensitivity (+5pp) with no retraining, using threshold 0.30 on log-odds-corrected probabilities. MMD degraded performance — insufficient target data for the domain alignment to converge. The root-cause analysis (`05_gap_analysis.ipynb`) explains why all methods plateau — see below.
+Confidence intervals from 1,000-sample bootstrap resampling (n=136). The +0.012 AUC gain from IW and the 0.000 gain from LS are **not statistically significant** — all CIs overlap substantially. MMD is the only method that clearly underperforms (its CI barely touches the baseline lower bound). The primary value of label shift correction is the +5pp sensitivity gain via principled threshold transfer, not AUC improvement.
+
+The root-cause analysis (`05_gap_analysis.ipynb`) explains why all methods plateau — see below.
 
 ---
 
@@ -210,7 +221,7 @@ jupyter notebook notebooks/04_model_extensions.ipynb
 # 6. Gap analysis
 jupyter notebook notebooks/05_gap_analysis.ipynb
 
-# 7. Full results comparison (ROC/PR, calibration, SHAP, subgroups)
+# 7. Full results comparison (ROC/PR, calibration, SHAP, bootstrap CIs, DCA)
 jupyter notebook notebooks/06_results_comparison.ipynb
 ```
 
@@ -235,8 +246,9 @@ scipy
 
 ## Limitations
 
-- **External validation set is small** (136 patients from MIMIC-III demo). Results on full MIMIC-III would have tighter confidence intervals.
-- **BP/INR features are unreliable in training** — 74–84% missing in eICU means the model never learned to rely on blood pressure or INR. A model trained on data with complete BP coverage would likely generalise better.
+- **External validation set is small** (136 patients from MIMIC-III demo). Bootstrap 95% CIs on MIMIC ROC-AUC span ±0.09. Results on full MIMIC-III would have substantially tighter intervals.
+- **BP/INR features are unreliable in training** — 74–84% missing in eICU means the model never learned to rely on blood pressure or INR. A model trained on data with complete BP coverage would likely generalise better. SHAP analysis confirms BP features have near-zero importance on both eICU and MIMIC despite real values being present in MIMIC.
+- **Domain adaptation methods do not significantly improve generalisation** — bootstrap CIs confirm that IW (+0.012 AUC) and LS (0.000 AUC) gains are indistinguishable from sampling noise at n=136. The gap is structural (missingness pattern mismatch + case mix shift) rather than correctable by reweighting.
 - **Threshold is context-dependent** — the 0.044 threshold applies to eICU-distribution data; a different deployment context requires re-deriving the threshold or applying the label shift correction with the appropriate target prevalence.
 - **Young patients (<45) are not well served** — AUC 0.425 on this subgroup. Do not use this model for young ICU patients without further validation.
 - **No prospective validation.** All results are retrospective.
